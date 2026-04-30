@@ -1,0 +1,27 @@
+name: Route Inbox
+
+on:
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  route:
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_TOKEN: ${{ secrets.PERSONAL_AI_KB_TOKEN }}
+      GITHUB_OWNER: ${{ github.repository_owner }}
+      GITHUB_REPO: ${{ github.event.repository.name }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      GAS_WEBHOOK_URL: ${{ secrets.GAS_WEBHOOK_URL }}
+      GAS_SECRET: ${{ secrets.GAS_SECRET }}
+      TZ: Asia/Tokyo
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+      - run: python scripts/route_issue.py
