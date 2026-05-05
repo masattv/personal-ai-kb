@@ -1,3 +1,4 @@
+import base64
 import json
 import os
 from datetime import datetime, timedelta, timezone
@@ -104,6 +105,81 @@ def create_routing_comment(client: GitHubClient, issue_number: int, routed: dict
     )
 
 
+# ---------------------------------------------------------------------------
+# Knowledge Markdown helpers
+# ---------------------------------------------------------------------------
+
+def slugify(text: str) -> str:
+    """Convert text to a URL-safe slug (ASCII alphanumeric + hyphens)."""
+    safe = "".join(c if c.isalnum() else "-" for c in text.lower())
+    safe = "-".join(part for part in safe.split("-") if part)
+    return safe[:80] or "untitled"
+
+
+def create_knowledge_markdown(issue: dict, routed: dict) -> str:
+    """Generate a Markdown document with frontmatter for a knowledge item."""
+    now = datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S %z")
+
+    title = routed.get("title") or issue.get("title", "")
+    description = routed.get("description", "")
+    reason = routed.get("reason", "")
+    issue_number = issue["number"]
+    issue_url = issue.get("html_url", "")
+
+    return f"""---
+title: "{title}"
+type: knowledge
+source: github_issue
+issue_number: {issue_number}
+created_at: "{now}"
+tags:
+  - knowledge
+---
+
+# {title}
+
+## 内容
+
+{description}
+
+## ルーティング理由
+
+{reason}
+
+## 元Issue
+
+- #{issue_number}
+- {issue_url}
+"""
+
+
+def create_repo_file(client: GitHubClient, path: str, content: str, message: str) -> None:
+    """Create a file in the repository via the GitHub Contents API."""
+    encoded = base64.b64encode(content.encode("utf-8")).decode("utf-8")
+
+    client.request(
+        "PUT",
+        f"/contents/{path}",
+        json={
+            "message": message,
+            "content": encoded,
+        },
+    )
+
+
+def repo_file_exists(client: GitHubClient, path: str) -> bool:
+    """Return True if the file already exists in the repository."""
+    try:
+        client.request("GET", f"/contents/{path}")
+        return True
+    except RuntimeError:
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
 def main() -> None:
     owner = os.getenv("GITHUB_OWNER") or os.getenv("GITHUB_REPOSITORY", "/").split("/")[0]
     repo = os.getenv("GITHUB_REPO") or os.getenv("GITHUB_REPOSITORY", "/").split("/")[-1]
@@ -136,6 +212,24 @@ def main() -> None:
 
             if routed_type in ["calendar", "task"]:
                 send_to_gas(routed)
+
+            elif routed_type == "knowledge":
+                knowledge_title = routed.get("title") or title
+                slug = slugify(knowledge_title)
+                date_prefix = datetime.now(JST).strftime("%Y-%m-%d")
+                path = f"knowledge/{date_prefix}-{slug}.md"
+
+                if not repo_file_exists(client, path):
+                    md = create_knowledge_markdown(issue, routed)
+                    create_repo_file(
+                        client,
+                        path,
+                        md,
+                        f"Add knowledge from issue #{number}",
+                    )
+                    print(f"Created knowledge file: {path}")
+                else:
+                    print(f"Knowledge file already exists, skipping: {path}")
 
             create_routing_comment(client, number, routed)
 
